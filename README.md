@@ -16,6 +16,8 @@ The script compares tracks and generates two output files:
 - Compares playlist tracks against your Liked Songs
 - Prints useful statistics
 - Saves results into an `output/` folder
+- Caches Liked Songs locally to reduce Spotify API requests
+- Handles Spotify rate-limit errors gracefully
 
 ---
 
@@ -33,6 +35,7 @@ The following files are automatically ignored and should never be committed:
 - `.cache`
 - `.venv/`
 - `output/`
+- `cache/`
 
 ---
 
@@ -169,6 +172,10 @@ The app will:
 4. Compare the selected playlist against your Liked Songs
 5. Create result files in the `output/` folder
 
+On first launch, the app fetches your Liked Songs from Spotify and creates a local cache inside the `cache/` folder.
+
+Future launches can reuse the cache to avoid unnecessary Spotify API requests and rate limits.
+
 ## Output
 
 The app creates:
@@ -233,9 +240,10 @@ http://127.0.0.1:8888/callback
 
 ## Notes
 
-- Spotify API is free
-- No billing risk
-- Only rate limiting may occur
+- Spotify Web API is free to use for personal projects
+- No billing risk exists for this application
+- Spotify may temporarily rate-limit excessive requests
+- The app uses local caching to minimize API usage
 
 ---
 

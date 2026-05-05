@@ -1,15 +1,17 @@
+import json
 from pathlib import Path
-
 import questionary
 import spotipy
 from dotenv import load_dotenv
 from spotipy.oauth2 import SpotifyOAuth
+from spotipy.exceptions import SpotifyException
 
 load_dotenv()
 
 SCOPE = "user-library-read playlist-read-private playlist-read-collaborative"
 OUTPUT_DIR = Path("output")
-
+CACHE_DIR = Path("cache")
+LIKED_TRACKS_CACHE = CACHE_DIR / "liked_tracks.json"
 
 def get_spotify_client():
     return spotipy.Spotify(
@@ -21,7 +23,17 @@ def get_spotify_client():
     )
 
 
-def get_all_liked_tracks(sp):
+def get_all_liked_tracks(sp, force_refresh=False):
+    CACHE_DIR.mkdir(exist_ok=True)
+
+    if LIKED_TRACKS_CACHE.exists() and not force_refresh:
+        print("Loading liked songs from cache...")
+
+        with open(LIKED_TRACKS_CACHE, "r", encoding="utf-8") as file:
+            return json.load(file)
+
+    print("Fetching liked songs from Spotify...")
+
     liked_tracks = {}
     offset = 0
 
@@ -34,10 +46,24 @@ def get_all_liked_tracks(sp):
 
         for item in items:
             track = item.get("track")
+
             if track and track.get("id"):
-                liked_tracks[track["id"]] = track
+                liked_tracks[track["id"]] = {
+                    "id": track["id"],
+                    "name": track.get("name", ""),
+                    "artists": [
+                        artist.get("name", "")
+                        for artist in track.get("artists", [])
+                    ],
+                    "url": track.get("external_urls", {}).get("spotify", ""),
+                }
 
         offset += 50
+
+    with open(LIKED_TRACKS_CACHE, "w", encoding="utf-8") as file:
+        json.dump(liked_tracks, file, ensure_ascii=False, indent=2)
+
+    print("Liked songs cache updated.")
 
     return liked_tracks
 
@@ -139,12 +165,37 @@ def write_tracks(filename, tracks):
         for track in tracks:
             file.write(format_track(track) + "\n")
 
+def should_refresh_liked_tracks_cache():
+    if not LIKED_TRACKS_CACHE.exists():
+        print("No liked songs cache found. Fetching from Spotify...")
+        return True
+
+    return questionary.confirm(
+        "Liked songs cache found. Refresh it from Spotify?",
+        default=False,
+    ).ask()
+
+def handle_spotify_error(error):
+    if error.http_status == 429:
+        retry_after = error.headers.get("Retry-After", "unknown")
+
+        print("\nSpotify rate limit reached.")
+        print(f"Try again after: {retry_after} seconds.")
+        print("The app will now exit safely.")
+        return
+
+    print("\nSpotify API error occurred.")
+    print(error)
 
 def main():
     sp = get_spotify_client()
 
-    print("Loading liked songs...")
-    liked_tracks = get_all_liked_tracks(sp)
+    refresh_cache = should_refresh_liked_tracks_cache()
+
+    liked_tracks = get_all_liked_tracks(
+        sp,
+        force_refresh=refresh_cache,
+    )
 
     print("Loading playlists...")
     playlists = get_user_playlists(sp)
@@ -185,4 +236,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SpotifyException as error:
+        handle_spotify_error(error)
+    except KeyboardInterrupt:
+        print("\nApp closed by user.")

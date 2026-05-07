@@ -18,16 +18,25 @@ The script compares tracks and generates two output files:
 - Saves results into an `output/` folder
 - Caches Liked Songs locally to reduce Spotify API requests
 - Handles Spotify rate-limit errors gracefully
+- Optionally adds non-liked playlist tracks to your Liked Songs after manual confirmation
+- Automatically updates the local liked songs cache after adding tracks
 
 ---
 
 ## Safety
 
-This project uses read-only Spotify permissions:
+This project uses Spotify permissions for:
+
+- Reading your Liked Songs
+- Reading your playlists
+- Manually adding selected tracks to your Liked Songs
 
 - `user-library-read`
+- `user-library-modify`
 - `playlist-read-private`
 - `playlist-read-collaborative`
+
+The application only modifies your Spotify library after explicit manual confirmation.
 
 The following files are automatically ignored and should never be committed:
 
@@ -170,12 +179,14 @@ The app will:
 2. Load your playlists
 3. Show an interactive playlist selector
 4. Compare the selected playlist against your Liked Songs
-5. Create result files in the `output/` folder
+5. Optionally allow adding non-liked songs to your Liked Songs
+6. Create result files in the `output/` folder
 
 On first launch, the app fetches your Liked Songs from Spotify and creates a local cache inside the `cache/` folder.
 
 Future launches can reuse the cache to avoid unnecessary Spotify API requests and rate limits.
 
+If tracks are added through the application, the local cache is automatically updated without requiring a full Spotify refetch.
 ## Output
 
 The app creates:
@@ -188,7 +199,7 @@ output/
 
 Console example:
 
-```
+```text
 RESULT
 ------
 Playlist: example
@@ -197,6 +208,9 @@ Loaded normal tracks: 100
 Already liked: 75
 Not liked: 25
 Unavailable/local/disabled items: 0
+Non-track items: 0
+
+Add 25 not-liked tracks to your Liked Songs? (y/N)
 ```
 
 ---
@@ -231,6 +245,14 @@ http://127.0.0.1:8888/callback
 
 ---
 
+### New Spotify permission does not appear
+
+If the application was updated with new Spotify scopes (for example `user-library-modify`), delete the local `.cache` file and run the application again.
+
+Spotify will then ask you to approve the updated permissions.
+
+---
+
 ### Playlist not found
 
 - Check spelling
@@ -244,6 +266,7 @@ http://127.0.0.1:8888/callback
 - No billing risk exists for this application
 - Spotify may temporarily rate-limit excessive requests
 - The app uses local caching to minimize API usage
+- The local cache only stays fully accurate if tracks are added through the application or the cache is refreshed manually
 
 ---
 

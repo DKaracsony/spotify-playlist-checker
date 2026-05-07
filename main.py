@@ -8,7 +8,7 @@ from spotipy.exceptions import SpotifyException
 
 load_dotenv()
 
-SCOPE = "user-library-read playlist-read-private playlist-read-collaborative"
+SCOPE = "user-library-read user-library-modify playlist-read-private playlist-read-collaborative"
 OUTPUT_DIR = Path("output")
 CACHE_DIR = Path("cache")
 LIKED_TRACKS_CACHE = CACHE_DIR / "liked_tracks.json"
@@ -60,8 +60,7 @@ def get_all_liked_tracks(sp, force_refresh=False):
 
         offset += 50
 
-    with open(LIKED_TRACKS_CACHE, "w", encoding="utf-8") as file:
-        json.dump(liked_tracks, file, ensure_ascii=False, indent=2)
+    save_liked_tracks_cache(liked_tracks)
 
     print("Liked songs cache updated.")
 
@@ -165,6 +164,39 @@ def write_tracks(filename, tracks):
         for track in tracks:
             file.write(format_track(track) + "\n")
 
+def chunk_list(items, size):
+    for index in range(0, len(items), size):
+        yield items[index:index + size]
+
+def track_to_cache_entry(track):
+    return {
+        "id": track["id"],
+        "name": track.get("name", ""),
+        "artists": [
+            artist.get("name", "")
+            for artist in track.get("artists", [])
+        ],
+        "url": track.get("external_urls", {}).get("spotify", ""),
+    }
+
+def add_tracks_to_liked_songs(sp, tracks):
+    if not tracks:
+        print("No tracks to add to Liked Songs.")
+        return 0
+
+    track_ids = [track["id"] for track in tracks if track.get("id")]
+
+    for chunk in chunk_list(track_ids, 50):
+        sp.current_user_saved_tracks_add(tracks=chunk)
+
+    return len(track_ids)
+
+def save_liked_tracks_cache(liked_tracks):
+    CACHE_DIR.mkdir(exist_ok=True)
+
+    with open(LIKED_TRACKS_CACHE, "w", encoding="utf-8") as file:
+        json.dump(liked_tracks, file, ensure_ascii=False, indent=2)
+
 def should_refresh_liked_tracks_cache():
     if not LIKED_TRACKS_CACHE.exists():
         print("No liked songs cache found. Fetching from Spotify...")
@@ -226,6 +258,28 @@ def main():
     print(f"Not liked: {len(not_liked)}")
     print(f"Unavailable/local/disabled items: {len(unavailable)}")
     print(f"Non-track items: {len(non_track_items)}")
+
+    if not_liked:
+        should_add = questionary.confirm(
+            f"Add {len(not_liked)} not-liked tracks to your Liked Songs?",
+            default=False,
+        ).ask()
+
+        if should_add:
+            added_count = add_tracks_to_liked_songs(sp, not_liked)
+            print(f"Added {added_count} tracks to Liked Songs.")
+
+            liked_tracks.update(
+                {
+                    track["id"]: track_to_cache_entry(track)
+                    for track in not_liked
+                }
+            )
+
+            save_liked_tracks_cache(liked_tracks)
+            print("Liked songs cache updated with newly added tracks.")
+    else:
+        print("All loaded playlist tracks are already liked.")
 
     write_tracks("already_liked.txt", already_liked)
     write_tracks("not_liked.txt", not_liked)

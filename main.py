@@ -8,10 +8,18 @@ from spotipy.exceptions import SpotifyException
 
 load_dotenv()
 
-SCOPE = "user-library-read user-library-modify playlist-read-private playlist-read-collaborative"
+SCOPE = (
+    "user-library-read "
+    "user-library-modify "
+    "playlist-read-private "
+    "playlist-read-collaborative "
+    "playlist-modify-public "
+    "playlist-modify-private"
+)
 OUTPUT_DIR = Path("output")
 CACHE_DIR = Path("cache")
 LIKED_TRACKS_CACHE = CACHE_DIR / "liked_tracks.json"
+BACK_TO_MAIN_MENU = "← Back to main menu"
 
 def get_spotify_client():
     return spotipy.Spotify(
@@ -89,14 +97,15 @@ def select_playlist(playlists):
         print("No playlists found.")
         return None
 
-    choices = [playlist["name"] for playlist in playlists]
+    choices = [BACK_TO_MAIN_MENU]
+    choices.extend(playlist["name"] for playlist in playlists)
 
     selected_name = questionary.select(
         "Choose playlist:",
         choices=choices,
     ).ask()
 
-    if not selected_name:
+    if not selected_name or selected_name == BACK_TO_MAIN_MENU:
         return None
 
     return next(
@@ -219,8 +228,109 @@ def handle_spotify_error(error):
     print("\nSpotify API error occurred.")
     print(error)
 
-def main():
-    sp = get_spotify_client()
+def select_main_action():
+    return questionary.select(
+        "Choose action:",
+        choices=[
+            "Check playlist tracks against Liked Songs",
+            "Manage playlists",
+            "Exit",
+        ],
+    ).ask()
+
+
+def get_current_user_id(sp):
+    user = sp.current_user()
+    return user["id"]
+
+
+def format_playlist_management_choice(playlist, current_user_id):
+    name = playlist.get("name", "Unknown playlist")
+    owner = playlist.get("owner", {})
+    owner_name = owner.get("display_name") or owner.get("id", "Unknown owner")
+    total_tracks = playlist.get("tracks", {}).get("total", "Unknown")
+
+    if owner.get("id") == current_user_id:
+        return f"[OWNED] {name} | {total_tracks} tracks"
+    
+    return f"[SAVED] {name} | Owner: {owner_name} | {total_tracks} tracks"
+
+
+def select_playlist_for_management(playlists, current_user_id):
+    if not playlists:
+        print("No playlists found.")
+        return None
+
+    choices = {
+        format_playlist_management_choice(playlist, current_user_id): playlist
+        for playlist in playlists
+    }
+
+    selection_choices = [BACK_TO_MAIN_MENU]
+    selection_choices.extend(list(choices.keys()))
+
+    selected = questionary.select(
+        "Choose playlist:",
+        choices=selection_choices,
+    ).ask()
+
+    if not selected or selected == BACK_TO_MAIN_MENU:
+        return None
+
+    return choices[selected]
+
+
+def remove_playlist_from_library(sp, playlist, current_user_id):
+    playlist_name = playlist.get("name", "Unknown playlist")
+    owner = playlist.get("owner", {})
+    owner_id = owner.get("id")
+    owner_name = owner.get("display_name") or owner_id or "Unknown owner"
+
+    is_owned = owner_id == current_user_id
+
+    print("\nSelected playlist:")
+    print(f"Name: {playlist_name}")
+    print(f"Owner: {owner_name}")
+
+    if is_owned:
+        print("\nThis playlist is owned by you.")
+        print("Spotify API does not provide true permanent playlist deletion.")
+        print("This will remove/unfollow the playlist from your Spotify account.")
+    else:
+        print("\nThis playlist is saved/followed from another user.")
+        print("This will remove it from your Spotify library.")
+
+    confirmed = questionary.confirm(
+        "Continue?",
+        default=False,
+    ).ask()
+
+    if not confirmed:
+        print("Playlist removal cancelled.")
+        return
+
+    sp.current_user_unfollow_playlist(playlist["id"])
+
+    if is_owned:
+        print(f'Owned playlist "{playlist_name}" removed from your Spotify account.')
+    else:
+        print(f'Saved playlist "{playlist_name}" removed from your library.')
+
+
+def run_playlist_management(sp):
+    print("Loading playlists...")
+    playlists = get_user_playlists(sp)
+
+    current_user_id = get_current_user_id(sp)
+
+    playlist = select_playlist_for_management(playlists, current_user_id)
+
+    if not playlist:
+        return
+
+    remove_playlist_from_library(sp, playlist, current_user_id)
+
+def run_liked_songs_checker(sp):
 
     refresh_cache = should_refresh_liked_tracks_cache()
 
@@ -235,7 +345,6 @@ def main():
     playlist = select_playlist(playlists)
 
     if not playlist:
-        print("No playlist selected.")
         return
 
     print(f'Loading playlist "{playlist["name"]}"...')
@@ -288,6 +397,19 @@ def main():
     print("output/already_liked.txt")
     print("output/not_liked.txt")
 
+def main():
+    sp = get_spotify_client()
+
+    while True:
+        action = select_main_action()
+
+        if action == "Check playlist tracks against Liked Songs":
+            run_liked_songs_checker(sp)
+        elif action == "Manage playlists":
+            run_playlist_management(sp)
+        else:
+            print("App closed.")
+            break
 
 if __name__ == "__main__":
     try:
